@@ -34,6 +34,7 @@ from homeassistant.components.climate.const import (
     PRESET_ECO,
     PRESET_HOME,
     PRESET_SLEEP,
+    SWING_OFF,
     ATTR_TARGET_TEMP_HIGH,
     ATTR_TARGET_TEMP_LOW,
     HVACMode,
@@ -231,6 +232,8 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
         self._available = True
         self._unit_of_measurement = hass.config.units.temperature_unit
         self._attr_supported_features = 0
+        self._enable_turn_on_off_backwards_compatibility = False
+        self._last_on_operation = None
 
         self._attr_hvac_modes = config[CONF_MODE_LIST]
         self._attr_fan_modes = config[CONF_FAN_MODE_LIST]
@@ -256,6 +259,11 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
             self._set_hvac_mode_script = Script(
                 hass, set_hvac_mode_action, self._attr_name, DOMAIN
             )
+            if HVACMode.OFF in self._attr_hvac_modes:
+                self._attr_supported_features |= (
+                    ClimateEntityFeature.TURN_OFF |
+                    ClimateEntityFeature.TURN_ON 
+                )
 
         self._set_swing_mode_script = None
         set_swing_mode_action = config.get(CONF_SET_SWING_MODE_ACTION)
@@ -339,7 +347,7 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
                 ATTR_PRESET_MODE, PRESET_COMFORT
             )
             self._current_swing_mode = previous_state.attributes.get(
-                ATTR_SWING_MODE, HVACMode.OFF
+                ATTR_SWING_MODE, SWING_OFF
             )
 
             if current_temperature := previous_state.attributes.get(
@@ -358,6 +366,9 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
 
             if humidity := previous_state.attributes.get(ATTR_HUMIDITY):
                 self._target_humidity = humidity
+            if 'last_on_operation' in previous_state.attributes:
+                self._last_on_operation = previous_state.attributes['last_on_operation']
+
 
         # register templates
         if self._min_temp_template:
@@ -726,12 +737,20 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
     def swing_modes(self):
         """List of available swing modes."""
         return self._swing_modes_list
+    
+    @property
+    def last_on_operation(self):
+        """Return the last non-idle operation ie. heat, cool."""
+        return self._last_on_operation
 
     async def async_set_hvac_mode(self, hvac_mode: str) -> None:
         """Set new operation mode."""
         if self._hvac_mode_template is None:
             self._current_operation = hvac_mode  # always optimistic
             self.async_write_ha_state()
+
+        if not hvac_mode == HVACMode.OFF:
+            self._last_on_operation = hvac_mode
 
         if self._set_hvac_mode_script is not None:
             await self._set_hvac_mode_script.async_run(
@@ -816,3 +835,15 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
             await self._set_humidity_script.async_run(
                 run_variables={ATTR_HUMIDITY: humidity}, context=self._context
             )
+
+    async def async_turn_off(self) -> None:
+        """Turn off."""
+        if HVACMode.OFF in self._attr_hvac_modes:
+            await self.async_set_hvac_mode(HVACMode.OFF)
+
+    async def async_turn_on(self) -> None:
+        """Turn on."""
+        if self._last_on_operation in self._attr_hvac_modes:
+            await self.async_set_hvac_mode(self._last_on_operation)
+        else:
+            await self.async_set_hvac_mode(self._attr_hvac_modes[0])
