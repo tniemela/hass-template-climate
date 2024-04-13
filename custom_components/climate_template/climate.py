@@ -240,6 +240,7 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
         self._attr_preset_modes = config[CONF_PRESET_MODE_LIST]
         self._swing_modes_list = config[CONF_SWING_MODE_LIST]
 
+        self._forward_updates = False
         self.entity_id = async_generate_entity_id(
             ENTITY_ID_FORMAT, config[CONF_NAME], hass=hass
         )
@@ -544,51 +545,61 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
     def _update_target_humidity(self, humidity):
         if humidity not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             try:
-                self._target_humidity = float(humidity)
-                self.hass.async_create_task(
-                    self.async_set_humidity(self._target_humidity)
-                )
+                if self._target_humidity != float(humidity):
+                    self._target_humidity = float(humidity)
+                    if self._forward_updates:
+                        self.hass.async_create_task(
+                            self.async_set_humidity(self._target_humidity)
+                        )
             except ValueError:
                 _LOGGER.error("Could not parse target humidity from %s", humidity)
 
     def _update_target_temp(self, temp):
         if temp not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             try:
-                self._target_temp = float(temp)
-                self.hass.async_create_task(
-                    self.async_set_temperature(**{ATTR_TEMPERATURE: self._target_temp})
-                )
+                if self._target_temp != float(temp):
+                    self._target_temp = float(temp)
+                    if self._forward_updates:
+                        self.hass.async_create_task(
+                            self.async_set_temperature(**{ATTR_TEMPERATURE: self._target_temp})
+                        )
             except ValueError:
                 _LOGGER.error("Could not parse temperature from %s", temp)
 
     def _update_target_temp_high(self, temp):
         if temp not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             try:
-                self._attr_target_temperature_high = float(temp)
-                self.hass.async_create_task(
-                    self.async_set_temperature(
-                        **{ATTR_TARGET_TEMP_HIGH: self._attr_target_temperature_high}
+                if self._attr_target_temperature_high != float(temp):
+                    self._attr_target_temperature_high = float(temp)
+                    if self._forward_updates:
+                        self.hass.async_create_task(
+                            self.async_set_temperature(
+                            **{ATTR_TARGET_TEMP_HIGH: self._attr_target_temperature_high}
+                        )
                     )
-                )
             except ValueError:
                 _LOGGER.error("Could not parse temperature high from %s", temp)
 
     def _update_target_temp_low(self, temp):
         if temp not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             try:
-                self._attr_target_temperature_low = float(temp)
-                self.hass.async_create_task(
-                    self.async_set_temperature(
-                        **{ATTR_TARGET_TEMP_LOW: self._attr_target_temperature_low}
-                    )
-                )
+                if self._attr_target_temperature_low != float(temp):
+                    self._attr_target_temperature_low = float(temp)
+                    if self._forward_updates:
+                        self.hass.async_create_task(
+                            self.async_set_temperature(
+                            **{ATTR_TARGET_TEMP_LOW: self._attr_target_temperature_low}
+                            )
+                        )
             except ValueError:
                 _LOGGER.error("Could not parse temperature low from %s", temp)
 
     def _update_hvac_mode(self, hvac_mode):
         if hvac_mode in self._attr_hvac_modes:
-            self._current_operation = hvac_mode
-            self.hass.async_create_task(self.async_set_hvac_mode(hvac_mode))
+            if self._current_operation != hvac_mode:
+                self._current_operation = hvac_mode
+                if self._forward_updates:
+                    self.hass.async_create_task(self.async_set_hvac_mode(hvac_mode))
         elif hvac_mode not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             _LOGGER.error(
                 "Received invalid hvac mode: %s. Expected: %s.",
@@ -598,8 +609,10 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
 
     def _update_preset_mode(self, preset_mode):
         if preset_mode in self._attr_preset_modes:
-            self._current_preset_mode = preset_mode
-            self.hass.async_create_task(self.async_set_preset_mode(preset_mode))
+            if self._current_preset_mode != preset_mode:
+                self._current_preset_mode = preset_mode
+                if self._forward_updates:
+                    self.hass.async_create_task(self.async_set_preset_mode(preset_mode))
         elif preset_mode not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             _LOGGER.error(
                 "Received invalid preset mode %s. Expected %s.",
@@ -609,8 +622,10 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
 
     def _update_fan_mode(self, fan_mode):
         if fan_mode in self._attr_fan_modes:
-            self._current_fan_mode = fan_mode
-            self.hass.async_create_task(self.async_set_fan_mode(fan_mode))
+            if self._current_fan_mode != fan_mode:
+                self._current_fan_mode = fan_mode
+                if self._forward_updates:
+                    self.hass.async_create_task(self.async_set_fan_mode(fan_mode))
         elif fan_mode not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             _LOGGER.error(
                 "Received invalid fan mode: %s. Expected: %s.",
@@ -623,7 +638,8 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
             # check swing mode actually changed
             if self._current_swing_mode != swing_mode:
                 self._current_swing_mode = swing_mode
-                self.hass.async_create_task(self.async_set_swing_mode(swing_mode))
+                if self._forward_updates:
+                    self.hass.async_create_task(self.async_set_swing_mode(swing_mode))
         elif swing_mode not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             _LOGGER.error(
                 "Received invalid swing mode: %s. Expected: %s.",
