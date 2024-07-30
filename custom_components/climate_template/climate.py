@@ -295,21 +295,15 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
             self._set_temperature_script = Script(
                 hass, set_temperature_action, self._attr_name, DOMAIN
             )
-            if HVACMode.HEAT_COOL in self._attr_hvac_modes:
-                self._attr_supported_features |= (
-                    ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
-                )
+            if (HVACMode.HEAT_COOL in self._attr_hvac_modes) or (HVACMode.AUTO in self._attr_hvac_modes):
+                self._attr_supported_features |= ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
                 if HVACMode.OFF in self._attr_hvac_modes:
                     if len(self._attr_hvac_modes) > 2:
                         # when heat_cool and off are not the only modes
-                        self._attr_supported_features |= (
-                            ClimateEntityFeature.TARGET_TEMPERATURE
-                        )
+                        self._attr_supported_features |= ClimateEntityFeature.TARGET_TEMPERATURE
                 elif len(self._attr_hvac_modes) > 1:
                     # when heat_cool is not the only mode
-                    self._attr_supported_features |= (
-                        ClimateEntityFeature.TARGET_TEMPERATURE
-                    )
+                    self._attr_supported_features |= ClimateEntityFeature.TARGET_TEMPERATURE                    
             else:
                 self._attr_supported_features |= ClimateEntityFeature.TARGET_TEMPERATURE
 
@@ -334,11 +328,11 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
             if temperature := previous_state.attributes.get(
                 ATTR_TEMPERATURE, DEFAULT_TEMP
             ):
-                self._target_temp = float(temperature)
+                self._target_temp = int(temperature)
             if temperature_high := previous_state.attributes.get(ATTR_TARGET_TEMP_HIGH):
-                self._attr_target_temperature_high = float(temperature_high)
+                self._attr_target_temperature_high = int(temperature_high)
             if temperature_low := previous_state.attributes.get(ATTR_TARGET_TEMP_LOW):
-                self._attr_target_temperature_low = float(temperature_low)
+                self._attr_target_temperature_low = int(temperature_low)
 
             self._current_fan_mode = previous_state.attributes.get(
                 ATTR_FAN_MODE, FAN_LOW
@@ -692,7 +686,7 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
     def target_temperature(self):
         """Return the temperature we try to reach."""
         return (
-            self._target_temp if self._current_operation != HVACMode.HEAT_COOL else None
+            self._target_temp if self._current_operation not in (HVACMode.AUTO,HVACMode.HEAT_COOL) else None
         )
 
     @property
@@ -700,7 +694,7 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
         """Return the temperature high we try to reach."""
         return (
             self._attr_target_temperature_high
-            if self._current_operation == HVACMode.HEAT_COOL
+            if self._current_operation in (HVACMode.AUTO,HVACMode.HEAT_COOL)
             else None
         )
 
@@ -709,7 +703,7 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
         """Return the temperature low we try to reach."""
         return (
             self._attr_target_temperature_low
-            if self._current_operation == HVACMode.HEAT_COOL
+            if self._current_operation in (HVACMode.AUTO,HVACMode.HEAT_COOL)
             else None
         )
 
@@ -742,6 +736,17 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
     def last_on_operation(self):
         """Return the last non-idle operation ie. heat, cool."""
         return self._last_on_operation
+
+    @property
+    def supported_features(self) -> ClimateEntityFeature:
+        """ Override the default implementation to disable single-temp feature based on mode."""
+        if (
+            (self._attr_supported_features & ClimateEntityFeature.TARGET_TEMPERATURE) and 
+            (self._attr_supported_features & ClimateEntityFeature.TARGET_TEMPERATURE_RANGE) and
+            (self._current_operation in (HVACMode.AUTO,HVACMode.HEAT_COOL))
+        ):
+            return (self._attr_supported_features ^ ClimateEntityFeature.TARGET_TEMPERATURE)
+        return self._attr_supported_features
 
     async def async_set_hvac_mode(self, hvac_mode: str) -> None:
         """Set new operation mode."""
