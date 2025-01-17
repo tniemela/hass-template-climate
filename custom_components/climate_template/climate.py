@@ -198,6 +198,7 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
         )
 
         # set attrs
+        self._attr_supported_features = 0
         self._attr_name = config[CONF_NAME]
         self._attr_min_temp = config[CONF_TEMP_MIN]
         self._attr_max_temp = config[CONF_TEMP_MAX]
@@ -247,6 +248,7 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
             self._attr_supported_features |= ClimateEntityFeature.TURN_OFF
         elif len(self._attr_hvac_modes) > 1:
             self._attr_supported_features |= ClimateEntityFeature.TURN_OFF
+        self._last_hvac_mode = None
 
         # set script variables
         self._set_humidity_script = None
@@ -360,6 +362,9 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
 
             if humidity := previous_state.attributes.get(ATTR_HUMIDITY):
                 self._attr_target_humidity = humidity
+
+            if 'last_hvac_mode' in previous_state.attributes:
+                self._last_hvac_mode = previous_state.attributes.get('last_hvac_mode')
 
     @callback
     def _async_setup_templates(self) -> None:
@@ -604,6 +609,8 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
             hvac_mode = HVACMode(hvac_mode) if hvac_mode else None
             if self._attr_hvac_mode != hvac_mode:  # Only update if there's a change
                 self._attr_hvac_mode = hvac_mode
+                if hvac_mode != HVACMode.OFF:
+                    self._last_hvac_mode = hvac_mode
                 self.async_write_ha_state()  # Update HA state without triggering an action
         elif hvac_mode not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             _LOGGER.error(
@@ -692,6 +699,13 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
         )
 
     @property
+    def extra_state_attributes(self):
+        # The "last non-idle operation" [heat, cool, ...] is used in "set_on"
+        # method to return back to previous state, needs to be saved so that
+        # it is correctly returned if there was a reboot durin "hvac.OFF"
+        return { "last_hvac_mode" : self._last_hvac_mode }
+
+    @property
     def supported_features(self) -> ClimateEntityFeature:
         # Override the default implementation to disable single-temp feature based on mode,
         # otherwise UI will not show the range gauge 
@@ -707,6 +721,8 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
         """Set new operation mode."""
         if self._hvac_mode_template is None:
             self._attr_hvac_mode = hvac_mode  # always optimistic
+            if hvac_mode != HVACMode.OFF:
+                self._last_hvac_mode = hvac_mode
             self.async_write_ha_state()
 
         if self._set_hvac_mode_script:
@@ -820,3 +836,12 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
                 run_variables={ATTR_HUMIDITY: humidity},
                 context=self._context,
             )
+
+    # Override the default implementations which does not 
+    # try to return the last known mode on "turn_on"
+    async def async_turn_on(self) -> None:
+        """Turn on."""
+        if self._last_hvac_mode in self._attr_hvac_modes:
+            await self.async_set_hvac_mode(self._last_hvac_mode)
+        else:
+            super.async_turn_on()
