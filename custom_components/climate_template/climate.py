@@ -34,6 +34,7 @@ from homeassistant.components.climate.const import (
     PRESET_ECO,
     PRESET_HOME,
     PRESET_SLEEP,
+    SWING_OFF,
     ATTR_TARGET_TEMP_HIGH,
     ATTR_TARGET_TEMP_LOW,
     HVACMode,
@@ -210,7 +211,7 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
         self._attr_fan_mode = FAN_LOW
         self._attr_preset_mode = PRESET_COMFORT
         self._attr_hvac_mode = HVACMode.OFF
-        self._attr_swing_mode = HVACMode.OFF
+        self._attr_swing_mode = SWING_OFF
         self._attr_target_temperature = DEFAULT_TEMP
         self._attr_target_temperature_high = None
         self._attr_target_temperature_low = None
@@ -287,7 +288,10 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
             self._set_temperature_script = Script(
                 hass, set_temperature_action, self._attr_name, DOMAIN
             )
-            if HVACMode.HEAT_COOL in self._attr_hvac_modes:
+            if (
+                (HVACMode.HEAT_COOL in self._attr_hvac_modes) or 
+                (HVACMode.AUTO in self._attr_hvac_modes)
+            ):
                 self._attr_supported_features |= (
                     ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
                 )
@@ -337,7 +341,7 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
                 ATTR_PRESET_MODE, PRESET_COMFORT
             )
             self._attr_swing_mode = previous_state.attributes.get(
-                ATTR_SWING_MODE, HVACMode.OFF
+                ATTR_SWING_MODE, SWING_OFF
             )
 
             if current_temperature := previous_state.attributes.get(
@@ -665,7 +669,7 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
         """Return the temperature we try to reach."""
         return (
             self._attr_target_temperature
-            if self._attr_hvac_mode != HVACMode.HEAT_COOL
+            if self._attr_hvac_mode not in (HVACMode.AUTO,HVACMode.HEAT_COOL)
             else None
         )
 
@@ -674,7 +678,7 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
         """Return the temperature high we try to reach."""
         return (
             self._attr_target_temperature_high
-            if self._attr_hvac_mode == HVACMode.HEAT_COOL
+            if self._attr_hvac_mode in (HVACMode.AUTO,HVACMode.HEAT_COOL)
             else None
         )
 
@@ -683,9 +687,21 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
         """Return the temperature low we try to reach."""
         return (
             self._attr_target_temperature_low
-            if self._attr_hvac_mode == HVACMode.HEAT_COOL
+            if self._attr_hvac_mode in (HVACMode.AUTO,HVACMode.HEAT_COOL)
             else None
         )
+
+    @property
+    def supported_features(self) -> ClimateEntityFeature:
+        # Override the default implementation to disable single-temp feature based on mode,
+        # otherwise UI will not show the range gauge 
+        if (
+            (self._attr_supported_features & ClimateEntityFeature.TARGET_TEMPERATURE) and 
+            (self._attr_supported_features & ClimateEntityFeature.TARGET_TEMPERATURE_RANGE) and
+            (self._attr_hvac_mode in (HVACMode.AUTO,HVACMode.HEAT_COOL))
+        ):
+            return (self._attr_supported_features ^ ClimateEntityFeature.TARGET_TEMPERATURE)
+        return self._attr_supported_features
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new operation mode."""
@@ -743,7 +759,7 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
         """Set new target temperature explicitly triggered by user or automation."""
         updated = False
 
-        if kwargs.get(ATTR_HVAC_MODE, self._attr_hvac_mode) == HVACMode.HEAT_COOL:
+        if kwargs.get(ATTR_HVAC_MODE, self._attr_hvac_mode) in (HVACMode.HEAT_COOL, HVACMode.AUTO):
             # Explicitly update high and low target temperatures if provided
             high_temp = kwargs.get(ATTR_TARGET_TEMP_HIGH)
             low_temp = kwargs.get(ATTR_TARGET_TEMP_LOW)
@@ -755,7 +771,10 @@ class TemplateClimate(TemplateEntity, ClimateEntity, RestoreEntity):
                 self._attr_target_temperature_high = high_temp
                 updated = True
 
-            if low_temp is not None and low_temp != self._attr_target_temperature_low:
+            if (
+                low_temp is not None 
+                and low_temp != self._attr_target_temperature_low
+            ):
                 self._attr_target_temperature_low = low_temp
                 updated = True
 
